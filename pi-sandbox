@@ -4,12 +4,41 @@ set -eu
 NAME="pi-sandbox-${PWD:t}-$$"
 NAME="${NAME//[^a-zA-Z0-9_.-]/-}"
 
+AGENT_DIR="$HOME/.pi/agent"
+
+# Agent state lives in a named volume so platform-specific stuff pi manages
+# (auto-installed binaries in bin/, model caches, npm packages) stays
+# container-native. Bind-mounting the host agent dir leaks macOS binaries
+# (e.g. bin/fd) into the Linux container, which silently breaks @ file
+# completion: pi sees the file exists, skips its Linux download, then fails
+# to exec it.
+mounts=(
+  --mount "type=volume,source=pi-sandbox-agent,target=/root/.pi/agent"
+)
+
+# Host-managed config files shared into the container. pi writes these in
+# place (no atomic renames), so single-file bind mounts are safe, and edits
+# made inside the container persist on the host.
+for f in settings.json models.json auth.json trust.json; do
+  if [[ -f "$AGENT_DIR/$f" ]]; then
+    mounts+=(--mount "type=bind,source=$AGENT_DIR/$f,target=/root/.pi/agent/$f")
+  fi
+done
+
+# Sessions and optional agent-dir resources are shared too. Session/trust
+# paths line up because the project is bind-mounted at its real host path.
+for d in sessions extensions skills prompts themes; do
+  if [[ -d "$AGENT_DIR/$d" ]]; then
+    mounts+=(--mount "type=bind,source=$AGENT_DIR/$d,target=/root/.pi/agent/$d")
+  fi
+done
+
 exec docker run --rm -it \
   -e ANTHROPIC_API_KEY \
   -e TERM \
   -e COLORTERM \
   -w "$PWD" \
   --name "$NAME" \
-  --mount type=bind,source="$PWD",target="$PWD" \
-  --mount type=bind,source="$HOME/.pi/agent",target=/root/.pi/agent \
+  "${mounts[@]}" \
+  --mount "type=bind,source=$PWD,target=$PWD" \
   pi-sandbox "$@"
