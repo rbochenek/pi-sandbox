@@ -1,18 +1,15 @@
 #!/usr/bin/env zsh
 set -eu
 
-AGENT_DIR="$HOME/.pi/agent"
-SESSIONS_DIR="$AGENT_DIR/sessions"
-TRUST_FILE="$AGENT_DIR/trust.json"
-
-mkdir -p "$SESSIONS_DIR"
-touch "$TRUST_FILE"
+NAME="pi-sandbox-${PWD:t}-$$"
+NAME="${NAME//[^a-zA-Z0-9_.-]/-}"
 
 exec docker run --rm -it \
   -e ANTHROPIC_API_KEY \
+  -e TERM \
+  -e COLORTERM \
   -w "$PWD" \
+  --name "$NAME" \
   --mount type=bind,source="$PWD",target="$PWD" \
-  --mount type=bind,source="$AGENT_DIR",target=/root/.pi/agent,readonly \
-  --mount type=bind,source="$SESSIONS_DIR",target=/root/.pi/agent/sessions \
-  --mount type=bind,source="$TRUST_FILE",target=/root/.pi/agent/trust.json \
+  --mount type=bind,source="$HOME/.pi/agent",target=/root/.pi/agent \
   pi-sandbox "$@"
