@@ -12,8 +12,10 @@ AGENT_DIR="$HOME/.pi/agent"
 # (e.g. bin/fd) into the Linux container, which silently breaks @ file
 # completion: pi sees the file exists, skips its Linux download, then fails
 # to exec it.
+# Suffix the volume with the uid so different host users get isolated,
+# correctly-owned state instead of fighting over one volume's ownership.
 mounts=(
-  --mount "type=volume,source=pi-sandbox-agent,target=/root/.pi/agent"
+  --mount "type=volume,source=pi-sandbox-agent-$(id -u),target=/home/agent/.pi/agent"
 )
 
 # Host-managed config files shared into the container. pi writes these in
@@ -21,7 +23,7 @@ mounts=(
 # made inside the container persist on the host.
 for f in settings.json models.json auth.json trust.json; do
   if [[ -f "$AGENT_DIR/$f" ]]; then
-    mounts+=(--mount "type=bind,source=$AGENT_DIR/$f,target=/root/.pi/agent/$f")
+    mounts+=(--mount "type=bind,source=$AGENT_DIR/$f,target=/home/agent/.pi/agent/$f")
   fi
 done
 
@@ -29,11 +31,17 @@ done
 # paths line up because the project is bind-mounted at its real host path.
 for d in sessions extensions skills prompts themes; do
   if [[ -d "$AGENT_DIR/$d" ]]; then
-    mounts+=(--mount "type=bind,source=$AGENT_DIR/$d,target=/root/.pi/agent/$d")
+    mounts+=(--mount "type=bind,source=$AGENT_DIR/$d,target=/home/agent/.pi/agent/$d")
   fi
 done
 
+# Run as the host user (uid/gid 1000 baked into the image as 'agent') so
+# files pi creates on bind mounts — sessions included — are owned by the
+# host user, not root. HOME points at the agent user's home for pi's
+# container-local state (named volume below).
 exec docker run --rm -it \
+  --user "$(id -u):$(id -g)" \
+  -e HOME=/home/agent \
   -e ANTHROPIC_API_KEY \
   -e TERM \
   -e COLORTERM \
