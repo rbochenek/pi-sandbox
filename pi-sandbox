@@ -14,7 +14,7 @@ AGENT_DIR="$HOME/.pi/agent"
 # to exec it.
 # Suffix the volume with the uid so different host users get isolated,
 # correctly-owned state instead of fighting over one volume's ownership.
-mounts=(
+docker_args=(
   --mount "type=volume,source=pi-sandbox-agent-$(id -u),target=/home/agent/.pi/agent"
 )
 
@@ -23,7 +23,7 @@ mounts=(
 # made inside the container persist on the host.
 for f in settings.json models.json auth.json trust.json; do
   if [[ -f "$AGENT_DIR/$f" ]]; then
-    mounts+=(--mount "type=bind,source=$AGENT_DIR/$f,target=/home/agent/.pi/agent/$f")
+    docker_args+=(--mount "type=bind,source=$AGENT_DIR/$f,target=/home/agent/.pi/agent/$f")
   fi
 done
 
@@ -31,9 +31,29 @@ done
 # paths line up because the project is bind-mounted at its real host path.
 for d in sessions extensions skills prompts themes; do
   if [[ -d "$AGENT_DIR/$d" ]]; then
-    mounts+=(--mount "type=bind,source=$AGENT_DIR/$d,target=/home/agent/.pi/agent/$d")
+    docker_args+=(--mount "type=bind,source=$AGENT_DIR/$d,target=/home/agent/.pi/agent/$d")
   fi
 done
+
+# Docker-out-of-docker: bind the host docker socket in so the agent can run
+# 'docker', 'docker compose', etc. against the host daemon. This gives the
+# agent root-equivalent control of the host (the sandbox boundary becomes
+# just the daemon's), so set PI_SANDBOX_NO_DOCKER=1 to keep the sandbox
+# hermetic.
+if [[ -z "${PI_SANDBOX_NO_DOCKER:-}" && -S /var/run/docker.sock ]]; then
+  docker_args+=(--mount "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock")
+  # Grant the socket's group as a supplementary group so the non-root agent
+  # uid can open it. Linux hosts: root:docker (or root:root when the host
+  # has no docker group). macOS: Docker Desktop serves the Mac socket into
+  # its Linux VM as a root-owned proxy socket (/host-services/...), so the
+  # container always sees root:root — the group is 0 there, and BSD stat
+  # can't be used anyway.
+  if [[ "$(uname -s)" == Darwin ]]; then
+    docker_args+=(--group-add 0)
+  else
+    docker_args+=(--group-add "$(stat -c %g /var/run/docker.sock)")
+  fi
+fi
 
 # Run as the host user (uid/gid 1000 baked into the image as 'agent') so
 # files pi creates on bind mounts — sessions included — are owned by the
@@ -47,6 +67,6 @@ exec docker run --rm -it \
   -e COLORTERM \
   -w "$PWD" \
   --name "$NAME" \
-  "${mounts[@]}" \
+  "${docker_args[@]}" \
   --mount "type=bind,source=$PWD,target=$PWD" \
   pi-sandbox "$@"

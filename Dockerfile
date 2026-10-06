@@ -1,7 +1,13 @@
 FROM node:24-bookworm-slim
 
+# docker CLI + compose let the agent drive the HOST docker daemon (the
+# wrapper bind-mounts the host socket in; see pi-sandbox). Debian's
+# docker-compose is v2 — symlink it into the cli-plugins dir so the
+# 'docker compose' form works as well as the standalone 'docker-compose'.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash ca-certificates git ripgrep kitty-terminfo python3 curl procps less file build-essential pkg-config \
+  && apt-get install -y --no-install-recommends bash ca-certificates git ripgrep kitty-terminfo python3 curl procps less file build-essential pkg-config docker.io docker-compose \
+  && mkdir -p /usr/libexec/docker/cli-plugins \
+  && ln -sf /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose \
   && rm -rf /var/lib/apt/lists/*
 
 # Non-root user pi runs as. The wrapper passes --user "$(id -u):$(id -g)",
